@@ -1,0 +1,53 @@
+{
+  "name": "@offchaincafe/evm",
+  "version": "0.1.0",
+  "description": "Offchain Café EVM indexing node",
+  "keywords": [
+    "evm",
+    "offchain",
+    "graphql",
+    "web3"
+  ],
+  "author": "Offchain Café <code@offchain.cafe>",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": "18",
+    "pnpm": ">=6"
+  },
+  "main": "dist/src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "clean": "rm -rf dist",
+    "build": "tsc && resolve-tspaths --src .",
+    "start": "node dist/src/index.js",
+    "dev": "nodemon",
+    "db:get": "pnpm build && node dist/scripts/db/get.js",
+    "db:migrate": "pnpm build && node dist/scripts/db/migrate.js"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.13",
+    "@types/express": "^4.17.17",
+    "@types/morgan": "^1.9.4",
+    "@types/node": "^18.13.0",
+    "@types/pg": "^8.6.6",
+    "nodemon": "^2.0.20",
+    "prettier": "^2.8.4",
+    "resolve-tspaths": "^0.8.8",
+    "typescript": "^4.9.5"
+  },
+  "dependencies": {
+    "chalk": "^5.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "ethers": "^5.7.2",
+    "express": "^4.18.2",
+    "graphql": "^16.6.0",
+    "graphql-yoga": "^3.5.1",
+    "ioredis": "^5.3.1",
+    "morgan": "^1.10.0",
+    "nanoid": "^4.0.1",
+    "p-retry": "^5.1.2",
+    "pg": "^8.9.0"
+  }
+}
