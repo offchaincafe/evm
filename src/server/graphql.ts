@@ -41,7 +41,7 @@ type LogRow = {
   db_created_at: Date;
 };
 
-const latestChainBlockNumberKey = `${redis.prefix}latestBlock:number`;
+const latestChainBlockNumberKey = `${redis.prefix}latestBlockNumber`;
 
 async function getLatestChainBlock(): Promise<{
   number: number;
