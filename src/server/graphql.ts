@@ -181,7 +181,7 @@ export const yoga = createYoga({
           let query = "SELECT * FROM evm.logs";
           const queryArgs: any[] = [];
 
-          let whereClause = `WHERE contract_address = $2`;
+          let whereClause = `WHERE contract_address = $1`;
           queryArgs.push(toBuffer(parent.address));
 
           // Convert [["a", "b"], [], [], ["c"]] to
