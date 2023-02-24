@@ -8,6 +8,7 @@ import * as config from "@/config.js";
 import * as redis from "@/services/redis.js";
 import { nanoid } from "nanoid";
 import { fetchBlockTimestamp } from "@/services/eth.js";
+import { Channel } from "@eyalsh/async_channels";
 
 // TODO: Count log queries.
 
@@ -21,7 +22,7 @@ type Log = {
 
 type Block = {
   number: number;
-  timestamp: number;
+  timestamp?: number;
 };
 
 type Transaction = {
@@ -42,6 +43,7 @@ type LogRow = {
 };
 
 const latestChainBlockNumberKey = `${redis.prefix}latestBlockNumber`;
+const logsUpsertChannel = "evm_logs_upsert_notify";
 
 async function getLatestChainBlock(): Promise<{
   number: number;
@@ -56,6 +58,13 @@ async function getLatestChainBlock(): Promise<{
 function padTopic(topic: string): string {
   if (topic.length === 66) return topic;
   return "0x" + topic.slice(2).padStart(64, "0");
+}
+
+/**
+ * @param byteaString E.g. "\\xa3bb..."
+ */
+function byteaStringToBuffer(byteaString: string): Buffer {
+  return Buffer.from(byteaString.slice(2), "hex");
 }
 
 export const yoga = createYoga({
@@ -115,6 +124,13 @@ export const yoga = createYoga({
           address: String! # 0x string
         ): Contract
       }
+
+      type Subscription {
+        log(
+          contractAddress: String! # 0x string
+          topics: [[String]]
+        ): Log!
+      }
     `,
     resolvers: {
       Query: {
@@ -134,6 +150,109 @@ export const yoga = createYoga({
           return config.default.contracts.find((contract) =>
             contract.address.equals(toBuffer(address.toLowerCase()))
           );
+        },
+      },
+
+      Subscription: {
+        log: {
+          subscribe: async function* (
+            _,
+            {
+              contractAddress,
+              topics = [],
+            }: {
+              contractAddress: string;
+              topics: string[][];
+            }
+          ): AsyncGenerator<{ log: Log }> {
+            const pgClient = await pg.pool.connect();
+            let channel = new Channel<LogRow>();
+
+            try {
+              pgClient.on("notification", (msg) => {
+                if (msg.channel !== logsUpsertChannel) return;
+
+                const raw = JSON.parse(msg.payload!);
+                const logRow: LogRow = {
+                  block_number: raw.block_number,
+                  log_index: raw.log_index,
+                  tx_hash: byteaStringToBuffer(raw.tx_hash),
+                  contract_address: byteaStringToBuffer(raw.contract_address),
+                  data: byteaStringToBuffer(raw.data),
+                  topic0: raw.topic0,
+                  topic1: raw.topic1,
+                  topic2: raw.topic2,
+                  topic3: raw.topic3,
+                  db_created_at: new Date(raw.db_created_at),
+                };
+
+                if (
+                  !logRow.contract_address.equals(toBuffer(contractAddress))
+                ) {
+                  return; // Filtered out.
+                }
+
+                // Filter by topics.
+                if (topics.length > 0) {
+                  const logTopics = [
+                    logRow.topic0,
+                    logRow.topic1,
+                    logRow.topic2,
+                    logRow.topic3,
+                  ].map((topic) => (topic ? padTopic(topic) : null));
+
+                  if (
+                    !topics.every((topicGroup, index) => {
+                      if (topicGroup.length === 0) {
+                        return true; // No filter for this topic.
+                      }
+
+                      if (logTopics[index]) {
+                        return topicGroup.includes(logTopics[index]!);
+                      } else {
+                        return false; // Expected non-null topic, but got null.
+                      }
+                    })
+                  ) {
+                    return; // Filtered out.
+                  }
+                }
+
+                channel.send(logRow);
+              });
+
+              pgClient.query(`LISTEN ${logsUpsertChannel}`);
+
+              while (true) {
+                const logRow = await channel.get();
+                if (!logRow[1]) throw new Error("Channel closed unexpectedly");
+
+                const log: Log = {
+                  block: {
+                    number: logRow[0].block_number,
+                  },
+                  data: logRow[0].data,
+                  logIndex: logRow[0].log_index,
+                  transaction: {
+                    hash: logRow[0].tx_hash,
+                  },
+                  topics: [
+                    logRow[0].topic0,
+                    logRow[0].topic1,
+                    logRow[0].topic2,
+                    logRow[0].topic3,
+                  ].map((topic) => (topic ? toBuffer(topic) : null)),
+                };
+
+                konsole.log(["graphql", "subscribe", "log"], "Yield log", log);
+                yield { log };
+              }
+            } finally {
+              pgClient.query(`UNLISTEN ${logsUpsertChannel}`);
+              pgClient.release();
+              channel.close();
+            }
+          },
         },
       },
 
@@ -320,7 +439,7 @@ export const yoga = createYoga({
       Block: {
         number: (parent: Block): number => parent.number,
         timestamp: async (parent: Block): Promise<number> =>
-          await fetchBlockTimestamp(parent.number),
+          parent.timestamp || (await fetchBlockTimestamp(parent.number)),
       },
 
       Transaction: {
